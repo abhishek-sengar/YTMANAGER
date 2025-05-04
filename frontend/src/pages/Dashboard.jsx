@@ -56,7 +56,7 @@ export default function Dashboard() {
     setOpenDialog(true);
   };
   const handleAddClient = () => {
-    setDialogLabel("Client Email");
+    role === "owner" ? setDialogLabel("Invite Editor") : setDialogLabel("Invite Client");
     setInputValue("");
     setOpenDialog(true);
   };
@@ -115,7 +115,7 @@ export default function Dashboard() {
             onChannelClick={handleChannelClick}
             onClientClick={role === "owner" ? handleClientClick : undefined}
             onAddChannel={handleAddChannel}
-            onAddClient={role === "owner" ? handleAddClient : undefined}
+            onAddClient={handleAddClient}
           />
         </Box>
         {/* Main Content */}
@@ -149,7 +149,7 @@ export default function Dashboard() {
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-              <Button onClick={handleSubmitDialog}>Submit</Button>
+              <Button onClick={handleSubmitDialog}>Invite</Button>
             </DialogActions>
           </Dialog>
         </Box>

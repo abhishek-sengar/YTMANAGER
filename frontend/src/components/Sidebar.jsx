@@ -115,8 +115,8 @@ export default function Sidebar({
         
         // Refresh the sidebar data
         const res = await api.get("/sidebar-data");
-        if (res.data) {
-          onChannelClick && onChannelClick(res.data.channels[0]); // Select the first channel
+        if (res.data?.channels?.length > 0) {
+          onChannelClick?.(res.data.channels[0]); // Select the first channel
         }
         
         setAddChannelDialogOpen(false);
@@ -142,14 +142,6 @@ export default function Sidebar({
             ) : allChannels.length === 0 ? (
               <Box textAlign="center" py={4}>
                 <Typography color="text.secondary">No channels found</Typography>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  sx={{ mt: 2 }}
-                  onClick={handleAddYouTubeAccount}
-                >
-                  Add YouTube account
-                </Button>
               </Box>
             ) : (
               <List>
@@ -182,6 +174,16 @@ export default function Sidebar({
                 ))}
               </List>
             )}
+            <Box textAlign="center" py={4}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  sx={{ mt: 2 }}
+                  onClick={handleAddYouTubeAccount}
+                >
+                  Add YouTube account
+                </Button>
+              </Box>
           </div>
         </DialogContent>
         <DialogActions>
@@ -246,7 +248,7 @@ export default function Sidebar({
       {/* Editors Section */}
       <Divider sx={{ my: 1 }} />
       <Typography fontWeight={700} fontSize={15} mb={1}>
-        EDITORS
+        {role === "owner" ? "EDITORS" : "CLENTS"}
       </Typography>
       <Paper
         sx={{
