@@ -10,6 +10,7 @@ type Project struct {
 	Status      string    `db:"status" json:"status"` // pending, approved, rejected
 	EditorID    string    `db:"editor_id" json:"editor_id"`
 	OwnerID     string    `db:"owner_id" json:"owner_id"`
+	ChannelID   string    `db:"channel_id" json:"channel_id"`
 	CreatedAt   time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }

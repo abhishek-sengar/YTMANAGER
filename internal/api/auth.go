@@ -79,19 +79,19 @@ func Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
 	// Lookup user
 	var (
 		id           string
 		passwordHash string
 		role         string
+		name         string
 	)
 	err := db.DB.QueryRow(
-		`SELECT id, password_hash, role FROM users WHERE email = $1`,
+		`SELECT id, password_hash, role, name FROM users WHERE email = $1`,
 		req.Email,
-	).Scan(&id, &passwordHash, &role)
+	).Scan(&id, &passwordHash, &role, &name)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email "})
 		return
 	}
 
@@ -111,9 +111,11 @@ func Login(c *gin.Context) {
 	claims := jwt.MapClaims{
 		"sub":   id,
 		"email": req.Email,
+		"name":  name,
 		"role":  role,
 		"exp":   time.Now().Add(72 * time.Hour).Unix(),
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(jwtSecret))
 	if err != nil {

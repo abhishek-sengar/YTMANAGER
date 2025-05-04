@@ -58,6 +58,9 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("userID", claims["sub"])
 		c.Set("userEmail", claims["email"])
 		c.Set("userRole", claims["role"])
+		if name, exists := claims["name"]; exists {
+			c.Set("userName", name)
+		}
 
 		c.Next()
 	}

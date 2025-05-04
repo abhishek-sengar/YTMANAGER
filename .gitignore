@@ -3,3 +3,7 @@
 *.log
 vendor/
 main
+fontend/node_modules
+fontend/dist
+fontend/.envz
+node_modules

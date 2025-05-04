@@ -1,12 +1,13 @@
 package api
 
 import (
-	"net/http"
-	"time"
-
+	"fmt"
 	"github.com/abhishek-sengar/ytmanager/internal/db"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v4"
+	"net/http"
+	"time"
 )
 
 // CreateProjectRequest represents the JSON body for creating a project
@@ -82,24 +83,75 @@ type Project struct {
 }
 
 // GetProjects fetches all projects for the logged-in user
-func GetProjects(c *gin.Context) {
-	userIDInterface, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+// func GetProjects(c *gin.Context) {
+// 	userIDInterface, exists := c.Get("userID")
+// 	if !exists {
+// 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+// 		return
+// 	}
+// 	userID := userIDInterface.(string)
+
+// 	// Fetch projects where the user is Editor or Owner
+// 	rows, err := db.DB.Query(`
+//         SELECT id, title, description, video_path, status, created_at, updated_at
+//         FROM projects
+//         WHERE editor_id = $1 OR owner_id = $1
+//         ORDER BY created_at DESC
+//     `, userID)
+
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch projects: " + err.Error()})
+// 		return
+// 	}
+// 	defer rows.Close()
+
+// 	var projects []Project
+// 	for rows.Next() {
+// 		var p Project
+// 		if err := rows.Scan(
+// 			&p.ID, &p.Title, &p.Description, &p.VideoPath, &p.Status,
+// 			&p.CreatedAt, &p.UpdatedAt,
+// 		); err != nil {
+// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse project: " + err.Error()})
+// 			return
+// 		}
+// 		projects = append(projects, p)
+// 	}
+
+// 	c.JSON(http.StatusOK, projects)
+// }
+
+func GetUserProjects(c *gin.Context) {
+	userID, userOk := c.Get("userID")
+	role, roleOk := c.Get("userRole")
+
+	if !userOk || !roleOk {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	userID := userIDInterface.(string)
 
-	// Fetch projects where the user is Editor or Owner
-	rows, err := db.DB.Query(`
-        SELECT id, title, description, video_path, status, editor_id, owner_id, created_at, updated_at
-        FROM projects
-        WHERE editor_id = $1 OR owner_id = $1
-        ORDER BY created_at DESC
-    `, userID)
+	var query string
+	switch role {
+	case "editor":
+		query = `
+			SELECT id, title, description, video_path, status, created_at, updated_at
+			FROM projects
+			WHERE editor_id = $1
+			ORDER BY created_at DESC`
+	case "owner":
+		query = `
+			SELECT id, title, description, video_path, status, created_at, updated_at
+			FROM projects
+			WHERE owner_id = $1
+			ORDER BY created_at DESC`
+	default:
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unsupported role"})
+		return
+	}
 
+	rows, err := db.DB.Query(query, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch projects: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -109,9 +161,9 @@ func GetProjects(c *gin.Context) {
 		var p Project
 		if err := rows.Scan(
 			&p.ID, &p.Title, &p.Description, &p.VideoPath, &p.Status,
-			&p.EditorID, &p.OwnerID, &p.CreatedAt, &p.UpdatedAt,
+			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse project: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan failed: " + err.Error()})
 			return
 		}
 		projects = append(projects, p)
@@ -233,4 +285,124 @@ func RejectProject(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Project rejected successfully"})
+}
+
+func GetProjectDetailsByID(c *gin.Context) {
+	// Fetch userID from context (JWT middleware should set this)
+	userIDInterface, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+		return
+	}
+	userID := userIDInterface.(string)
+
+	// Get the project ID from the URL
+	projectID := c.Param("id")
+
+	// Declare a variable to hold the project details
+	var project Project
+
+	// Query the database using pgx (PostgreSQL)
+	// QueryRow will return a single row based on the project ID
+	err := db.DB.QueryRow(
+		`SELECT id, title, description, video_path, status, editor_id, owner_id, created_at, updated_at
+		 FROM projects
+		 WHERE id = $1 AND (editor_id = $2 OR owner_id = $2)`,
+		projectID, userID).Scan(
+		&project.ID, &project.Title, &project.Description, &project.VideoPath,
+		&project.Status, &project.EditorID, &project.OwnerID, &project.CreatedAt, &project.UpdatedAt,
+	)
+
+	// If there is no project, return 404
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch project: " + err.Error()})
+		}
+		return
+	}
+
+	// Return the project details in JSON
+	c.JSON(http.StatusOK, project)
+}
+
+func GetRecentProjects(c *gin.Context) {
+	userID, ok := c.Get("userID")
+	role, rok := c.Get("userRole")
+	if !ok || !rok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	ownerID := c.Query("owner_id")
+	channelID := c.Query("channel_id")
+
+	args := []interface{}{userID}
+	argIndex := 2
+	var query string
+
+	// Determine query based on user role
+	if role == "editor" {
+		query = `
+			SELECT p.id, p.title, p.description, p.status,
+				   ch.name AS channel_name,
+				   u.name AS owner_name,
+				   p.created_at, p.updated_at
+			FROM projects p
+			JOIN channels ch ON p.channel_id = ch.id
+			JOIN users u ON p.owner_id = u.id
+			WHERE p.editor_id = $1`
+	} else if role == "owner" {
+		query = `
+			SELECT p.id, p.title, p.description, p.status,
+				   ch.name AS channel_name,
+				   u.name AS editor_name,
+				   p.created_at, p.updated_at
+			FROM projects p
+			JOIN channels ch ON p.channel_id = ch.id
+			JOIN users u ON p.editor_id = u.id
+			WHERE p.owner_id = $1`
+	} else {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unsupported role"})
+		return
+	}
+
+	// Append extra filters if provided (owner_id or channel_id)
+	if channelID != "" {
+		query += fmt.Sprintf(" AND p.channel_id = $%d", argIndex)
+		args = append(args, channelID)
+		argIndex++
+	} else if ownerID != "" {
+		query += fmt.Sprintf(" AND p.owner_id = $%d", argIndex)
+		args = append(args, ownerID)
+		argIndex++
+	}
+
+	query += " ORDER BY p.updated_at DESC LIMIT 20" // Limit added to avoid huge result sets
+
+	// Run query
+	rows, err := db.DB.Query(query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Query failed: " + err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	// Prepare response
+	var projects []ProjectResponse
+	for rows.Next() {
+		var p ProjectResponse
+		if err := rows.Scan(
+			&p.ID, &p.Title, &p.Description, &p.Status,
+			&p.ChannelName, &p.OwnerName, // or editorName, based on role
+			&p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Scan failed: " + err.Error()})
+			return
+		}
+		projects = append(projects, p)
+	}
+
+	c.JSON(http.StatusOK, projects)
 }
