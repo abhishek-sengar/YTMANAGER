@@ -78,6 +78,8 @@ func main() {
 	protected.GET("/api/youtube/unattached-channels", api.GetUnattachedChannels)
 	protected.POST("/api/youtube/add-channels", api.AddChannelsToDashboard)
 
+	protected.POST("/api/video/upload", api.UploadVideoToGCS)
+
 	// Start the server
 	port := os.Getenv("PORT")
 	router.Run(":" + port)

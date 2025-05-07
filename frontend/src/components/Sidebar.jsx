@@ -20,10 +20,12 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import SearchIcon from "@mui/icons-material/Search";
+import VideoUploadIcon from "@mui/icons-material/VideoLibrary";
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import VideoUpload from "./VideoUpload";
 
 export default function Sidebar({
   channels,
@@ -36,6 +38,7 @@ export default function Sidebar({
   const [search, setSearch] = useState({ channels: "", clients: "" });
   const { role } = useAuth();
   const [addChannelDialogOpen, setAddChannelDialogOpen] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
   const handleAddChannel = () => {
     setAddChannelDialogOpen(true);
@@ -199,9 +202,23 @@ export default function Sidebar({
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#f5f6fa", p: 2 }}>
       {/* Channels Section */}
-      <Typography fontWeight={700} fontSize={15} mb={1} mt={1}>
-        CHANNELS
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        <Typography fontWeight={700} fontSize={15}>
+          CHANNELS
+        </Typography>
+        <Box>
+          {role === "owner" && (
+            <>
+              <IconButton size="small" onClick={handleAddChannel} sx={{ mr: 1 }}>
+                <AddIcon />
+              </IconButton>
+              <IconButton size="small" onClick={() => setUploadDialogOpen(true)}>
+                <VideoUploadIcon />
+              </IconButton>
+            </>
+          )}
+        </Box>
+      </Box>
       <Paper
         sx={{
           display: "flex",
@@ -221,12 +238,6 @@ export default function Sidebar({
           onChange={e => setSearch(s => ({ ...s, channels: e.target.value }))}
           sx={{ flex: 1, fontSize: 14 }}
         />
-        {/* Only show Add Channel for owner */}
-        {role === "owner" && (
-          <IconButton size="small" onClick={handleAddChannel}>
-            <AddIcon />
-          </IconButton>
-        )}
       </Paper>
       <List dense sx={{ maxHeight: 120, overflow: "auto", mb: 2 }}>
         {(channels || [])
@@ -294,6 +305,16 @@ export default function Sidebar({
 
       {/* Add Channel Dialog */}
       <AddChannelDialog />
+      
+      {/* Video Upload Dialog */}
+      <VideoUpload 
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        onSuccess={() => {
+          toast.success("Video uploaded successfully");
+          // You might want to refresh the project list here
+        }}
+      />
     </Box>
   );
 } 

@@ -1,13 +1,24 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"cloud.google.com/go/storage"
 	"github.com/abhishek-sengar/ytmanager/internal/db"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4"
-	"net/http"
-	"time"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/option"
+	"google.golang.org/api/youtube/v3"
 )
 
 // CreateProjectRequest represents the JSON body for creating a project
@@ -354,7 +365,7 @@ func GetRecentProjects(c *gin.Context) {
 			JOIN users u ON p.owner_id = u.id
 			WHERE p.editor_id = $1`
 	} else if role == "owner" {
-		query = `
+		query = `t4a
 			SELECT p.id, p.title, p.description, p.status,
 				   ch.name AS channel_name,
 				   u.name AS editor_name,
@@ -405,4 +416,278 @@ func GetRecentProjects(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, projects)
+}
+
+// VideoUploadRequest represents the request body for video upload
+type VideoUploadRequest struct {
+	Title       string `json:"title" binding:"required"`
+	Description string `json:"description"`
+	ChannelID   string `json:"channel_id" binding:"required"`
+	Privacy     string `json:"privacy" binding:"required"` // "private", "unlisted", "public"
+}
+
+// VideoUploadResponse represents the response for video upload
+type VideoUploadResponse struct {
+	VideoID   string `json:"video_id"`
+	UploadURL string `json:"upload_url"`
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+}
+
+// Initialize GCS client
+func initGCSClient() (*storage.Client, error) {
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx, option.WithCredentialsFile(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCS client: %v", err)
+	}
+	return client, nil
+}
+
+// UploadVideoToGCS handles the video upload to Google Cloud Storage
+// func UploadVideoToGCS(c *gin.Context) {
+// 	// Get user ID from context
+// 	userID := c.GetString("userID")
+// 	if userID == "" {
+// 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+// 		return
+// 	}
+
+// 	// Parse request body
+// 	var req VideoUploadRequest
+// 	if err := c.ShouldBindJSON(&req); err != nil {
+// 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+// 		return
+// 	}
+
+// 	// Get the uploaded file
+// 	file, header, err := c.Request.FormFile("video")
+// 	if err != nil {
+// 		c.JSON(http.StatusBadRequest, gin.H{"error": "No video file provided"})
+// 		return
+// 	}
+// 	defer file.Close()
+
+// 	// Initialize GCS client
+// 	gcsClient, err := initGCSClient()
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+// 		return
+// 	}
+// 	defer gcsClient.Close()
+
+// 	// Create a unique filename
+// 	filename := fmt.Sprintf("%s_%d%s", userID, time.Now().UnixNano(), filepath.Ext(header.Filename))
+// 	bucketName := os.Getenv("GCS_BUCKET_NAME")
+// 	if bucketName == "" {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "GCS bucket not configured"})
+// 		return
+// 	}
+
+// 	// Create GCS object
+// 	obj := gcsClient.Bucket(bucketName).Object(filename)
+// 	w := obj.NewWriter(context.Background())
+
+// 	// Copy file to GCS
+// 	if _, err := io.Copy(w, file); err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to upload to GCS: %v", err)})
+// 		return
+// 	}
+
+// 	// Close the writer
+// 	if err := w.Close(); err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to close GCS writer: %v", err)})
+// 		return
+// 	}
+
+// 	// Generate signed URL for YouTube upload
+// 	opts := &storage.SignedURLOptions{
+// 		Scheme:  storage.SigningSchemeV4,
+// 		Method:  "GET",
+// 		Expires: time.Now().Add(24 * time.Hour),
+// 	}
+
+// 	url, err := storage.SignedURL(bucketName, filename, opts)
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to generate signed URL: %v", err)})
+// 		return
+// 	}
+
+//		// Return response with upload URL
+//		c.JSON(http.StatusOK, VideoUploadResponse{
+//			UploadURL: url,
+//			Status:    "pending",
+//			Message:   "Video uploaded to GCS successfully",
+//		})
+//	}
+func UploadVideoToGCS(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Get the uploaded video file
+	file, header, err := c.Request.FormFile("video")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No video file provided"})
+		return
+	}
+	defer file.Close()
+
+	// Initialize GCS client
+	gcsClient, err := initGCSClient()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer gcsClient.Close()
+
+	// Generate filename
+	filename := fmt.Sprintf("%s_%d%s", userID, time.Now().UnixNano(), filepath.Ext(header.Filename))
+	bucketName := os.Getenv("GCS_BUCKET_NAME")
+	if bucketName == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "GCS bucket not configured"})
+		return
+	}
+
+	// Upload to GCS
+	obj := gcsClient.Bucket(bucketName).Object(filename)
+	w := obj.NewWriter(context.Background())
+	if _, err := io.Copy(w, file); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to upload to GCS: %v", err)})
+		return
+	}
+	if err := w.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to close GCS writer: %v", err)})
+		return
+	}
+
+	// Load service account JSON key
+	keyPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read service account key"})
+		return
+	}
+
+	// Extract credentials
+	var creds struct {
+		ClientEmail string `json:"client_email"`
+		PrivateKey  string `json:"private_key"`
+	}
+	if err := json.Unmarshal(keyData, &creds); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse service account key"})
+		return
+	}
+
+	// Generate signed URL
+	opts := &storage.SignedURLOptions{
+		Scheme:         storage.SigningSchemeV4,
+		Method:         "GET",
+		Expires:        time.Now().Add(24 * time.Hour),
+		GoogleAccessID: creds.ClientEmail,
+		PrivateKey:     []byte(creds.PrivateKey),
+	}
+	url, err := storage.SignedURL(bucketName, filename, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to generate signed URL: %v", err)})
+		return
+	}
+
+	// Send response
+	c.JSON(http.StatusOK, VideoUploadResponse{
+		VideoID:   filename,
+		UploadURL: url,
+		Status:    "pending",
+		Message:   "Video uploaded to GCS successfully",
+	})
+}
+
+// UploadVideoToYouTube handles the final upload to YouTube
+func UploadVideoToYouTube(c *gin.Context) {
+	// Get user ID from context
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Parse request body
+	var req VideoUploadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get YouTube service
+	ytService, err := getYouTubeService(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create YouTube video resource
+	video := &youtube.Video{
+		Snippet: &youtube.VideoSnippet{
+			Title:       req.Title,
+			Description: req.Description,
+			CategoryId:  "22", // People & Blogs
+		},
+		Status: &youtube.VideoStatus{
+			PrivacyStatus: req.Privacy,
+		},
+	}
+
+	// Call YouTube API to upload
+	call := ytService.Videos.Insert([]string{"snippet", "status"}, video)
+	_, err = call.Do()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to upload to YouTube: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Video uploaded to YouTube successfully"})
+}
+
+// getYouTubeService creates a YouTube service client
+func getYouTubeService(c *gin.Context) (*youtube.Service, error) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	// Get access token from database
+	var accessToken string
+	err := db.DB.QueryRow(`
+		SELECT access_token 
+		FROM youtube_accounts 
+		WHERE user_id = $1 
+		ORDER BY updated_at DESC 
+		LIMIT 1
+	`, userID).Scan(&accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get access token: %v", err)
+	}
+
+	// Create OAuth2 config
+	cfg := &oauth2.Config{
+		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL"),
+		Scopes:       []string{youtube.YoutubeUploadScope},
+		Endpoint:     google.Endpoint,
+	}
+
+	// Create token source
+	token := &oauth2.Token{AccessToken: accessToken}
+	client := cfg.Client(context.Background(), token)
+
+	// Create YouTube service
+	service, err := youtube.NewService(context.Background(), option.WithHTTPClient(client))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create YouTube service: %v", err)
+	}
+
+	return service, nil
 }
